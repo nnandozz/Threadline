@@ -3,7 +3,7 @@ import { ProgressMetric } from '@/components/ui/ProgressMetric'
 import { InsightCard } from '@/components/lesson/InsightCard'
 import { LessonCard } from '@/components/lesson/LessonCard'
 import { HomeworkCard } from '@/components/lesson/HomeworkCard'
-import { sarahThompson, alexMorgan, upcomingLesson, homeworkItems } from '@/data/mockData'
+import { ananyaSharma, rohanMehta, upcomingLesson, homeworkItems } from '@/data/mockData'
 import { formatLessonDateLabel } from '@/lib/utils'
 
 // A real preview of the actual product surface, built from the same
@@ -23,20 +23,20 @@ export function ProductPreviewMock() {
 
       <div className="flex flex-col gap-6 p-6 md:p-8">
         <div className="flex items-center gap-3">
-          <Avatar src={sarahThompson.avatarUrl} name={sarahThompson.name} size="md" />
+          <Avatar src={ananyaSharma.avatarUrl} name={ananyaSharma.name} size="md" />
           <div>
-            <p className="text-body font-semibold text-ink">{sarahThompson.name}</p>
-            <p className="text-small text-ink-secondary">{sarahThompson.level} · {sarahThompson.targetLanguage}</p>
+            <p className="text-body font-semibold text-ink">{ananyaSharma.name}</p>
+            <p className="text-small text-ink-secondary">{ananyaSharma.level} · {ananyaSharma.targetLanguage}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4 rounded-lg bg-background p-4">
           <div className="flex flex-col gap-1">
-            <p className="text-h3 text-ink">+{sarahThompson.totalVocabularyLearned}</p>
+            <p className="text-h3 text-ink">+{ananyaSharma.totalVocabularyLearned}</p>
             <p className="text-small text-ink-secondary">Words learned</p>
           </div>
-          <ProgressMetric label="Grammar" value={sarahThompson.skillLevels.grammar} />
-          <ProgressMetric label="Speaking" value={sarahThompson.skillLevels.speaking} />
+          <ProgressMetric label="Grammar" value={ananyaSharma.skillLevels.grammar} />
+          <ProgressMetric label="Speaking" value={ananyaSharma.skillLevels.speaking} />
         </div>
 
         <InsightCard>
@@ -46,8 +46,8 @@ export function ProductPreviewMock() {
         {upcomingLesson && (
           <LessonCard
             title={upcomingLesson.title}
-            withPersonName={alexMorgan.name}
-            withPersonAvatarUrl={alexMorgan.avatarUrl}
+            withPersonName={rohanMehta.name}
+            withPersonAvatarUrl={rohanMehta.avatarUrl}
             dateLabel={formatLessonDateLabel(upcomingLesson.date, upcomingLesson.time)}
           />
         )}

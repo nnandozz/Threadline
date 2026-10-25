@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PartyPopper, Check } from 'lucide-react'
+import { PartyPopper, Check, AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
@@ -8,6 +8,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { SelectableOption } from '@/components/auth/SelectableOption'
 import { OnboardingProgress } from '@/components/auth/OnboardingProgress'
 import { saveOnboardingAnswers, clearPendingSignup } from '@/lib/onboardingStore'
+import { useAuth } from '@/context/AuthContext'
+import { publishTutorProfile } from '@/lib/tutorProfile'
 import { cn } from '@/lib/utils'
 import {
   TUTOR_SUBJECTS,
@@ -36,7 +38,10 @@ interface TutorOnboardingProps {
 
 export function TutorOnboarding({ name }: TutorOnboardingProps) {
   const navigate = useNavigate()
+  const { user, completeTutorOnboarding } = useAuth()
   const [step, setStep] = useState(1)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [answers, setAnswers] = useState<TutorOnboardingAnswers>({
     subjects: [],
     experience: null,
@@ -45,6 +50,10 @@ export function TutorOnboarding({ name }: TutorOnboardingProps) {
     bio: '',
     avatarUrl: null,
     availability: [],
+    pricePerHour: 600,
+    formats: ['online'],
+    city: 'Delhi NCR',
+    area: '',
   })
 
   const firstName = name.trim().split(/\s+/)[0] || 'there'
@@ -68,19 +77,60 @@ export function TutorOnboarding({ name }: TutorOnboardingProps) {
   }
 
   function canContinue(): boolean {
-    if (step === 1) return answers.subjects.length > 0 && answers.experience !== null
-    if (step === 2) return answers.education.trim().length > 0 && answers.teachingStyle.trim().length > 0
+    if (step === 1)
+      return answers.subjects.length > 0 && answers.experience !== null && answers.formats.length > 0 && answers.pricePerHour > 0
+    if (step === 2)
+      return answers.education.trim().length > 0 && answers.teachingStyle.trim().length > 0 && answers.city.trim().length > 0
     if (step === 3) return answers.bio.trim().length > 0 && answers.avatarUrl !== null
     if (step === 4) return answers.availability.length > 0
     return true
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     if (step < TOTAL_STEPS) {
       setStep(step + 1)
-    } else {
+      return
+    }
+
+    setSubmitError(null)
+    setIsSubmitting(true)
+    try {
       saveOnboardingAnswers('tutor', answers)
+      const headline = `${answers.subjects.join(' & ')} tutor`
+
+      const res = await completeTutorOnboarding(
+        answers.subjects,
+        headline,
+        answers.bio,
+        answers.avatarUrl,
+        answers.pricePerHour,
+      )
+
+      if (!res.success) {
+        setSubmitError(res.error || 'Failed to complete tutor onboarding. Please try again.')
+        return
+      }
+
+      if (user) {
+        publishTutorProfile(
+          {
+            ...user,
+            headline,
+            bio: answers.bio,
+            avatarUrl: answers.avatarUrl || user.avatarUrl,
+            pricePerHour: answers.pricePerHour,
+            targetSubjects: answers.subjects,
+            onboardingCompleted: true,
+          },
+          answers,
+        )
+      }
+
       setStep(TOTAL_STEPS + 1)
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred.')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -98,7 +148,7 @@ export function TutorOnboarding({ name }: TutorOnboardingProps) {
         <div className="flex flex-col gap-1.5">
           <h1 className="text-h2">You're all set, {firstName}!</h1>
           <p className="text-body text-ink-secondary">
-            Your profile is ready. Students will be able to find and book lessons with you.
+            Your public profile is listed with the details you provided. Students can find you once they search the marketplace.
           </p>
         </div>
         <Button
@@ -146,22 +196,57 @@ export function TutorOnboarding({ name }: TutorOnboardingProps) {
               ))}
             </div>
           </div>
+
+          <div className="flex flex-col gap-1.5 pt-2">
+            <label className="text-small font-medium text-ink">Base hourly tuition rate (₹)</label>
+            <Input
+              type="number"
+              min="200"
+              max="3000"
+              step="50"
+              value={answers.pricePerHour}
+              onChange={(e) => setAnswers((prev) => ({ ...prev, pricePerHour: Number(e.target.value) }))}
+            />
+          </div>
         </StepBlock>
       )}
 
       {step === 2 && (
-        <StepBlock title="Tell us about your background">
+        <StepBlock title="Tell us about your background & location">
           <Input
             label="Education"
-            placeholder="e.g. B.A. in English Literature, University of Leeds"
+            placeholder="e.g. B.Tech in Computer Science, IIT Delhi or M.A. English, Delhi University"
             value={answers.education}
             onChange={(e) => setAnswers((prev) => ({ ...prev, education: e.target.value }))}
           />
           <Input
             label="Teaching style"
-            placeholder="e.g. Structured but relaxed, focused on real conversation"
+            placeholder="e.g. Structured but relaxed, focused on conceptual clarity and real conversation"
             value={answers.teachingStyle}
             onChange={(e) => setAnswers((prev) => ({ ...prev, teachingStyle: e.target.value }))}
+          />
+          <div className="flex flex-col gap-1">
+            <label className="text-small font-medium text-ink">Primary City / Region</label>
+            <select
+              value={answers.city}
+              onChange={(e) => setAnswers((prev) => ({ ...prev, city: e.target.value }))}
+              aria-label="Primary city or region"
+              className="h-10 rounded-lg border border-border bg-white px-3 text-small text-ink focus:border-primary focus:outline-none"
+            >
+              <option value="Delhi NCR">Delhi NCR</option>
+              <option value="Mumbai">Mumbai</option>
+              <option value="Bengaluru">Bengaluru</option>
+              <option value="Pune">Pune</option>
+              <option value="Chennai">Chennai</option>
+              <option value="Chandigarh">Chandigarh</option>
+              <option value="Gurugram">Gurugram</option>
+            </select>
+          </div>
+          <Input
+            label="Area / Neighborhood (Optional for in-person discovery)"
+            placeholder="e.g. South Delhi, Koramangala, Bandra West"
+            value={answers.area}
+            onChange={(e) => setAnswers((prev) => ({ ...prev, area: e.target.value }))}
           />
         </StepBlock>
       )}
@@ -222,14 +307,30 @@ export function TutorOnboarding({ name }: TutorOnboardingProps) {
         </StepBlock>
       )}
 
+      {submitError && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          <AlertCircle size={16} className="mt-0.5 shrink-0 text-red-600" />
+          <p className="flex-1">{submitError}</p>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         {step > 1 && (
-          <Button variant="secondary" size="lg" onClick={handleBack} className="flex-1">
+          <Button variant="secondary" size="lg" onClick={handleBack} disabled={isSubmitting} className="flex-1">
             Back
           </Button>
         )}
-        <Button size="lg" onClick={handleContinue} disabled={!canContinue()} className="flex-1">
-          {step === TOTAL_STEPS ? 'Finish' : 'Continue'}
+        <Button size="lg" onClick={handleContinue} disabled={!canContinue() || isSubmitting} className="flex-1">
+          {isSubmitting ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Saving Profile…
+            </>
+          ) : step === TOTAL_STEPS ? (
+            'Finish'
+          ) : (
+            'Continue'
+          )}
         </Button>
       </div>
     </div>

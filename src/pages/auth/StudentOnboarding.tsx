@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PartyPopper } from 'lucide-react'
+import { PartyPopper, AlertCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { SelectableOption } from '@/components/auth/SelectableOption'
 import { OnboardingProgress } from '@/components/auth/OnboardingProgress'
 import { saveOnboardingAnswers, clearPendingSignup } from '@/lib/onboardingStore'
+import { updateLearningPreferences } from '@/lib/marketplaceStore'
+import { useAuth } from '@/context/AuthContext'
 import {
   ONBOARDING_SUBJECTS,
   ONBOARDING_LEVELS,
@@ -42,7 +44,10 @@ interface StudentOnboardingProps {
 
 export function StudentOnboarding({ name }: StudentOnboardingProps) {
   const navigate = useNavigate()
+  const { completeStudentOnboarding } = useAuth()
   const [step, setStep] = useState(1)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [answers, setAnswers] = useState<StudentOnboardingAnswers>({
     subject: null,
     level: null,
@@ -67,12 +72,39 @@ export function StudentOnboarding({ name }: StudentOnboardingProps) {
     return true
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     if (step < TOTAL_STEPS) {
       setStep(step + 1)
-    } else {
+      return
+    }
+
+    setSubmitError(null)
+    setIsSubmitting(true)
+    try {
       saveOnboardingAnswers('student', answers)
-      setStep(TOTAL_STEPS + 1) // completion screen
+      // Save learning preferences to user preferences
+      updateLearningPreferences({
+        targetSubjects: answers.subject ? [answers.subject] : [],
+        educationLevel: answers.level || 'Intermediate',
+        learningGoal: answers.goals.join(', '),
+      })
+
+      const res = await completeStudentOnboarding(
+        answers.subject ? [answers.subject] : [],
+        answers.level || 'Intermediate',
+        answers.goals,
+      )
+
+      if (!res.success) {
+        setSubmitError(res.error || 'Failed to save student onboarding. Please try again.')
+        return
+      }
+
+      setStep(TOTAL_STEPS + 1) // Only advance to completion screen upon confirmed database persistence!
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : 'An unexpected error occurred.')
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -174,14 +206,30 @@ export function StudentOnboarding({ name }: StudentOnboardingProps) {
         </StepBlock>
       )}
 
+      {submitError && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+          <AlertCircle size={16} className="mt-0.5 shrink-0 text-red-600" />
+          <p className="flex-1">{submitError}</p>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         {step > 1 && (
-          <Button variant="secondary" size="lg" onClick={handleBack} className="flex-1">
+          <Button variant="secondary" size="lg" onClick={handleBack} disabled={isSubmitting} className="flex-1">
             Back
           </Button>
         )}
-        <Button size="lg" onClick={handleContinue} disabled={!canContinue()} className="flex-1">
-          {step === TOTAL_STEPS ? 'Finish' : 'Continue'}
+        <Button size="lg" onClick={handleContinue} disabled={!canContinue() || isSubmitting} className="flex-1">
+          {isSubmitting ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Saving Profile…
+            </>
+          ) : step === TOTAL_STEPS ? (
+            'Finish'
+          ) : (
+            'Continue'
+          )}
         </Button>
       </div>
     </div>

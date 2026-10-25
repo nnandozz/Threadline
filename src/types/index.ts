@@ -19,6 +19,34 @@ export interface User {
   avatarUrl: string
 }
 
+export interface AvailabilitySlot {
+  date: string // ISO date, e.g. "2026-08-12"
+  times: string[] // e.g. ["09:00", "14:00", "18:30"]
+}
+
+export type TeachingFormat = 'online' | 'in-person-tutor' | 'in-person-student' | 'hybrid' | 'group'
+
+export interface TutorLocation {
+  city: string
+  area: string // e.g. "Connaught Place", "Koramangala", "South Delhi"
+  country: string
+  travelRadiusKm?: number
+  offersInPersonStudent: boolean // tutor travels to student
+  offersInPersonTutor: boolean // student visits tutor's studio
+  travelFee?: number
+  addressGeneral?: string
+}
+
+export interface TutorPackage {
+  id: string
+  title: string
+  lessonCount: number
+  durationMinutes: number
+  discountPercent: number
+  price: number
+  format: TeachingFormat
+}
+
 export interface Tutor extends User {
   role: 'tutor'
   headline: string
@@ -32,11 +60,15 @@ export interface Tutor extends User {
   yearsExperience: number
   introVideoThumbnailUrl?: string
   availability: AvailabilitySlot[]
-}
-
-export interface AvailabilitySlot {
-  date: string // ISO date, e.g. "2026-08-12"
-  times: string[] // e.g. ["09:00", "14:00", "18:30"]
+  // Marketplace extensions
+  formats: TeachingFormat[]
+  location?: TutorLocation
+  subjectCategories: string[]
+  educationLevels: string[]
+  qualifications: string[]
+  verificationStatus: 'verified' | 'pending' | 'demo'
+  packageOffers?: TutorPackage[]
+  badges?: string[]
 }
 
 export interface Student extends User {
@@ -59,6 +91,84 @@ export interface Student extends User {
   recurringErrors: RecurringError[]
   vocabulary: VocabularyWord[]
   progressHistory: ProgressPoint[]
+  learningPreferences?: StudentLearningPreferences
+  aiPrivacySettings?: AIMemoryPrivacySettings
+}
+
+export interface StudentLearningPreferences {
+  targetSubjects: string[]
+  educationLevel: string
+  preferredFormats: TeachingFormat[]
+  city?: string
+  area?: string
+  maxBudgetPerHour: number
+  weeklyAvailability: string[]
+  learningGoal: string
+}
+
+export interface AIMemoryPrivacySettings {
+  shareGoals: boolean
+  shareRecurringErrors: boolean
+  shareVocabulary: boolean
+  shareAssessmentNotes: boolean
+  allowLessonAudioAnalysisConsent: boolean
+}
+
+export interface CourseModule {
+  id: string
+  title: string
+  description: string
+  durationHours: number
+  topics: string[]
+}
+
+export interface Course {
+  id: string
+  tutorId: string
+  title: string
+  subtitle: string
+  description: string
+  subject: string
+  category: string
+  level: string
+  format: TeachingFormat
+  price: number
+  totalHours: number
+  weeksDuration: number
+  startDate: string
+  schedule: string
+  maxCapacity: number
+  enrolledCount: number
+  syllabus: CourseModule[]
+  learningObjectives: string[]
+  prerequisites: string[]
+  rating: number
+  reviewCount: number
+  imageUrl?: string
+}
+
+export type BookingType = 'single' | 'package' | 'course' | 'group'
+export type BookingStatus = 'confirmed' | 'pending' | 'completed' | 'cancelled'
+
+export interface Booking {
+  id: string
+  studentId: string
+  studentName?: string
+  tutorId: string
+  courseId?: string
+  type: BookingType
+  subject: string
+  format: TeachingFormat
+  date: string
+  time: string
+  durationMinutes: number
+  price: number
+  status: BookingStatus
+  locationDetails?: string
+  onlineMeetingUrl?: string
+  packageId?: string
+  notes?: string
+  createdAt: string
 }
 
 export interface RecurringError {
@@ -99,6 +209,10 @@ export interface Lesson {
   durationMinutes: number
   status: LessonStatus
   topics: string[]
+  format?: TeachingFormat
+  locationDetails?: string
+  courseId?: string
+  meetingUrl?: string
   // Populated only once status === 'completed'
   summary?: LessonSummary
 }
@@ -126,9 +240,10 @@ export interface HomeworkItem {
   durationMinutes: number
   completed: boolean
   dateAssigned: string
-  // The date of the next lesson after the one this was generated from —
-  // homework is meant to be practiced before picking the thread back up.
   dueDate: string
+  courseId?: string
+  tutorId?: string
 }
 
 export type UserRole = 'student' | 'tutor'
+

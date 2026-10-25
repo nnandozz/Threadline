@@ -1,3 +1,5 @@
+import type { TeachingFormat } from '@/types'
+
 // ─────────────────────────────────────────────────────────────
 // Onboarding intake types
 //
@@ -65,4 +67,8 @@ export interface TutorOnboardingAnswers {
   bio: string
   avatarUrl: string | null
   availability: TutorAvailabilityOption[]
+  pricePerHour: number
+  formats: TeachingFormat[]
+  city: string
+  area: string
 }

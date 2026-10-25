@@ -23,23 +23,33 @@ export function titleFromPath(pathname: string): string {
   return last.charAt(0).toUpperCase() + last.slice(1).replace(/-/g, ' ')
 }
 
+// Formats an INR amount using Indian locale and currency symbol.
+// e.g. formatINR(1200) → "₹1,200"
+export function formatINR(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
 // Formats a lesson's ISO date + 24h time into a short display label,
 // e.g. "Fri · 7:00 PM". Derived from real data rather than hardcoded so it
 // can't drift out of sync with a lesson's actual date.
 export function formatLessonDateLabel(isoDate: string, time24h: string): string {
   const [hours, minutes] = time24h.split(':').map(Number)
   const date = new Date(`${isoDate}T00:00:00`)
-  const weekday = date.toLocaleDateString('en-US', { weekday: 'short' })
+  const weekday = date.toLocaleDateString('en-IN', { weekday: 'short' })
   const period = hours >= 12 ? 'PM' : 'AM'
   const hour12 = hours % 12 === 0 ? 12 : hours % 12
   const minuteLabel = String(minutes).padStart(2, '0')
   return `${weekday} · ${hour12}:${minuteLabel} ${period}`
 }
 
-// Short, friendly date label for lists/cards, e.g. "Aug 14".
+// Short, friendly date label for lists/cards, e.g. "24 Oct".
 export function formatShortDate(isoDate: string): string {
   const date = new Date(`${isoDate}T00:00:00`)
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
 // Time-of-day greeting based on the visitor's real local clock.
