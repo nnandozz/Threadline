@@ -149,6 +149,7 @@ export function SignupPage() {
 
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <Input
+          id="signup-name"
           label="Full name"
           type="text"
           autoComplete="name"
@@ -159,6 +160,7 @@ export function SignupPage() {
           disabled={isSubmitting}
         />
         <Input
+          id="signup-email"
           label="Email address"
           type="email"
           autoComplete="email"
@@ -169,6 +171,7 @@ export function SignupPage() {
           disabled={isSubmitting}
         />
         <Input
+          id="signup-password"
           label="Password"
           type="password"
           autoComplete="new-password"
@@ -180,6 +183,7 @@ export function SignupPage() {
           disabled={isSubmitting}
         />
         <Input
+          id="signup-confirm-password"
           label="Confirm password"
           type="password"
           autoComplete="new-password"

@@ -19,14 +19,13 @@ import { FormatBadge } from '@/components/ui/FormatBadge'
 import { Avatar } from '@/components/ui/Avatar'
 import { useAuth } from '@/context/AuthContext'
 import {
-  getBookings,
   getEnrolledCourseIds,
   getLearningPreferences,
-  cancelBooking,
   getTutorById,
   getCourseById,
   useCatalog,
 } from '@/lib/marketplaceStore'
+import { fetchUserBookings, updateBookingStatus } from '@/lib/bookingService'
 import {
   getUserHomework,
   getUserVocabulary,
@@ -50,11 +49,13 @@ export function StudentDashboard() {
   useEffect(() => {
     if (!studentId) return
 
-    function loadData() {
-      setBookings(getBookings(studentId))
+    async function loadData() {
       setEnrolledCourseIds(getEnrolledCourseIds(studentId))
       setHomework(getUserHomework(studentId))
       setPreferences(getLearningPreferences(studentId))
+
+      const { bookings: fetched } = await fetchUserBookings(studentId, 'student')
+      setBookings(fetched)
     }
 
     loadData()
@@ -73,6 +74,9 @@ export function StudentDashboard() {
   const enrolledCourses = enrolledCourseIds
     .map((id) => getCourseById(id) ?? courses.find((c) => c.id === id))
     .filter((c): c is NonNullable<typeof c> => Boolean(c))
+
+  // Bookings grouped by status
+  const pendingBookings = bookings.filter((b) => b.status === 'pending')
 
   // Upcoming confirmed bookings sorted by date
   const upcomingBookings = bookings
@@ -101,10 +105,15 @@ export function StudentDashboard() {
     return t.rating >= 4.8
   }).slice(0, 3)
 
-  function handleCancelBooking(bookingId: string) {
-    if (confirm('Are you sure you want to cancel this lesson?')) {
-      cancelBooking(bookingId)
-      setBookings(getBookings(studentId))
+  async function handleCancelBooking(bookingId: string) {
+    if (confirm('Are you sure you want to cancel this booking?')) {
+      const res = await updateBookingStatus(bookingId, 'cancelled')
+      if (res.error) {
+        alert(res.error)
+      } else {
+        const { bookings: fetched } = await fetchUserBookings(studentId, 'student')
+        setBookings(fetched || [])
+      }
     }
   }
 
@@ -279,6 +288,11 @@ export function StudentDashboard() {
                   {upcomingBookings.length}
                 </span>
               )}
+              {pendingBookings.length > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">
+                  {pendingBookings.length} pending
+                </span>
+              )}
             </button>
 
             <button
@@ -320,7 +334,75 @@ export function StudentDashboard() {
 
           {/* TAB 1: Upcoming Sessions */}
           {activeTab === 'sessions' && (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-4">
+              {/* Pending Booking Requests awaiting tutor acceptance */}
+              {pendingBookings.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Clock size={16} className="text-amber-600" />
+                      <h3 className="text-sm font-semibold text-amber-950">
+                        Pending Booking Requests ({pendingBookings.length})
+                      </h3>
+                    </div>
+                    <span className="text-xs font-medium text-amber-700">Awaiting Tutor Acceptance</span>
+                  </div>
+
+                  <div className="flex flex-col gap-2.5">
+                    {pendingBookings.map((b) => {
+                      const tutor = getTutorById(b.tutorId) ?? tutors.find((t) => t.id === b.tutorId)
+                      return (
+                        <div
+                          key={b.id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-amber-200/60 bg-white p-3.5 shadow-xs"
+                        >
+                          <div className="flex items-start gap-3">
+                            <Avatar
+                              src={tutor?.avatarUrl}
+                              name={tutor?.name || 'Tutor'}
+                              size="sm"
+                              className="h-9 w-9 shrink-0"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-semibold text-slate-900">
+                                  {tutor?.name || 'Assigned Tutor'}
+                                </span>
+                                <span className="text-slate-300">·</span>
+                                <span className="text-xs text-slate-500">{b.subject}</span>
+                                <Badge tone="warning">Pending Approval</Badge>
+                                <FormatBadge format={b.format} />
+                              </div>
+                              <div className="mt-1 flex items-center gap-3 text-xs text-slate-500">
+                                <span className="flex items-center gap-1 font-medium text-slate-700">
+                                  <Clock size={12} className="text-slate-400" />
+                                  {formatLessonDateLabel(b.date, b.time)}
+                                </span>
+                                <span className="text-slate-300">·</span>
+                                <span>{b.durationMinutes} min</span>
+                                <span className="text-slate-300">·</span>
+                                <span className="font-semibold text-slate-800">{formatINR(b.price)}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleCancelBooking(b.id)}
+                              className="text-xs text-slate-500 hover:text-red-600 px-2 py-1 h-8"
+                            >
+                              Cancel Request
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               {upcomingBookings.length > 0 ? (
                 upcomingBookings.map((b) => {
                   const tutor = getTutorById(b.tutorId) ?? tutors.find((t) => t.id === b.tutorId)
@@ -378,7 +460,7 @@ export function StudentDashboard() {
                     </div>
                   )
                 })
-              ) : (
+              ) : pendingBookings.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 text-slate-400 mb-3">
                     <Calendar size={22} />
@@ -391,7 +473,7 @@ export function StudentDashboard() {
                     Find a Tutor
                   </Link>
                 </div>
-              )}
+              ) : null}
             </div>
           )}
 

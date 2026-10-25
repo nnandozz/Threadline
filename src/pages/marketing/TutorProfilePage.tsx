@@ -8,6 +8,7 @@ import {
   Calendar,
   Award,
   ShieldCheck,
+  Loader2,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Badge } from '@/components/ui/Badge'
@@ -15,9 +16,9 @@ import { buttonClasses } from '@/components/ui/Button'
 import { FormatBadge } from '@/components/ui/FormatBadge'
 import { CourseCard } from '@/components/course/CourseCard'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { isTutorSaved, toggleSaveTutor, useCatalog } from '@/lib/marketplaceStore'
+import { getTutorById, fetchTutorById, isTutorSaved, toggleSaveTutor, useCatalog } from '@/lib/marketplaceStore'
 import { formatLessonDateLabel, formatINR } from '@/lib/utils'
-import type { TeachingFormat } from '@/types'
+import type { TeachingFormat, Tutor } from '@/types'
 
 export function TutorProfilePage() {
   const { tutorId } = useParams<{ tutorId: string }>()
@@ -26,7 +27,40 @@ export function TutorProfilePage() {
   const [selectedFormat, setSelectedFormat] = useState<TeachingFormat>('online')
 
   const { tutors, courses } = useCatalog()
-  const tutor = tutors.find((t) => t.id === tutorId)
+  const cached = (tutorId ? getTutorById(tutorId) : undefined) ?? tutors.find((t) => t.id === tutorId)
+  const [tutor, setTutor] = useState<Tutor | undefined>(cached)
+  const [isLoading, setIsLoading] = useState<boolean>(!cached)
+
+  useEffect(() => {
+    if (!tutorId) {
+      setIsLoading(false)
+      return
+    }
+
+    const localTutor = getTutorById(tutorId) ?? tutors.find((t) => t.id === tutorId)
+    if (localTutor) {
+      setTutor(localTutor)
+      setIsLoading(false)
+      return
+    }
+
+    let isMounted = true
+    setIsLoading(true)
+    fetchTutorById(tutorId)
+      .then((res) => {
+        if (isMounted) {
+          setTutor(res ?? undefined)
+          setIsLoading(false)
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoading(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [tutorId, tutors])
 
   useEffect(() => {
     if (tutor) {
@@ -34,6 +68,17 @@ export function TutorProfilePage() {
       setSelectedFormat(tutor.formats[0] ?? 'online')
     }
   }, [tutor])
+
+  if (isLoading) {
+    return (
+      <div className="mx-auto flex min-h-[400px] max-w-4xl items-center justify-center px-4 py-16">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-brand" />
+          <p className="text-small text-ink-muted">Loading tutor profile...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!tutor) {
     return (

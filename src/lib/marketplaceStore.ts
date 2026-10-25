@@ -10,8 +10,10 @@ import type {
 } from '@/types'
 import { getCurrentUser } from '@/lib/authService'
 import { safeGetItem, safeSetItem } from '@/lib/persistence'
-import { mergeAvailability, removeAvailabilityTime } from '@/lib/availability'
+import { mergeAvailability, removeAvailabilityTime, generateAvailabilityFromWindows } from '@/lib/availability'
 import { allTutors } from '@/data/mockData'
+import { getSupabaseClient } from '@/lib/supabaseClient'
+import type { TutorAvailabilityOption } from '@/types/onboarding'
 
 const STORE_EVENT = 'threadline_store_updated'
 const BOOKINGS_KEY = 'threadline_bookings'
@@ -100,6 +102,121 @@ export function upsertTutorProfile(tutor: Tutor): Tutor {
   return tutor
 }
 
+export function buildTutorFromProfileRecord(profile: {
+  id: string
+  full_name?: string | null
+  avatar_url?: string | null
+  headline?: string | null
+  bio?: string | null
+  price_per_hour?: number | null
+  target_subjects?: string[] | null
+  level?: string | null
+  verification_status?: string | null
+}): Tutor {
+  const defaultWindows: TutorAvailabilityOption[] = [
+    'Weekday mornings',
+    'Weekday afternoons',
+    'Weekday evenings',
+    'Weekend mornings',
+    'Weekend afternoons',
+  ]
+  const subjects =
+    profile.target_subjects && profile.target_subjects.length > 0
+      ? profile.target_subjects
+      : ['General Tutoring']
+
+  const tutor: Tutor = {
+    id: profile.id,
+    role: 'tutor',
+    name: profile.full_name || 'Threadline Tutor',
+    avatarUrl: profile.avatar_url || '',
+    headline: profile.headline || `${subjects[0]} Tutor`,
+    bio: profile.bio || 'Experienced tutor dedicated to helping students succeed.',
+    rating: 5.0,
+    reviewCount: 1,
+    languages: ['English'],
+    specialties: subjects,
+    teachingStyle: 'Interactive, structured, and goal-oriented.',
+    pricePerHour: profile.price_per_hour ? Number(profile.price_per_hour) : 600,
+    yearsExperience: 3,
+    availability: generateAvailabilityFromWindows(defaultWindows),
+    formats: ['online', 'in-person-tutor', 'in-person-student'],
+    location: {
+      city: 'Delhi NCR',
+      area: 'South Delhi',
+      country: 'India',
+      offersInPersonStudent: true,
+      offersInPersonTutor: true,
+    },
+    subjectCategories: subjects,
+    educationLevels: ['Secondary (Classes 9-10)', 'Higher Secondary (Classes 11-12)', 'Undergraduate'],
+    qualifications: ['Verified Educator'],
+    verificationStatus: profile.verification_status === 'approved' ? 'verified' : 'pending',
+    badges: ['Verified Tutor'],
+  }
+
+  return tutor
+}
+
+export async function fetchTutorById(tutorId: string): Promise<Tutor | null> {
+  if (!tutorId) return null
+
+  // 1. Check local catalog first
+  const cached = getTutorById(tutorId)
+  if (cached) return cached
+
+  // 2. Query public_tutor_profiles (approved tutors discoverable by students & public)
+  try {
+    const supabase = getSupabaseClient()
+    const { data: publicProfile, error: publicError } = await supabase
+      .from('public_tutor_profiles')
+      .select('*')
+      .eq('id', tutorId)
+      .maybeSingle()
+
+    if (publicProfile && !publicError) {
+      const tutor = buildTutorFromProfileRecord(publicProfile)
+      upsertTutorProfile(tutor)
+      return tutor
+    }
+
+    // 3. Fallback: if caller is the tutor or if direct profile lookup is authorized
+    const { data: ownProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', tutorId)
+      .maybeSingle()
+
+    if (ownProfile && ownProfile.role === 'tutor') {
+      const tutor = buildTutorFromProfileRecord(ownProfile)
+      upsertTutorProfile(tutor)
+      return tutor
+    }
+  } catch (err) {
+    console.warn('Error fetching tutor profile from Supabase:', err)
+  }
+
+  return null
+}
+
+export async function syncPublicTutors(): Promise<void> {
+  try {
+    const supabase = getSupabaseClient()
+    const { data, error } = await supabase
+      .from('public_tutor_profiles')
+      .select('*')
+
+    if (error || !data || data.length === 0) return
+
+    for (const record of data) {
+      const tutor = buildTutorFromProfileRecord(record)
+      upsertTutorProfile(tutor)
+    }
+  } catch (err) {
+    console.warn('Error syncing public tutors from Supabase:', err)
+  }
+}
+
 export function patchTutorProfile(tutorId: string, patch: Partial<Tutor>): Tutor | null {
   const existing = getTutorById(tutorId)
   if (!existing) return null
@@ -162,6 +279,7 @@ export function useCatalog() {
       setCourses(listCourses())
     }
     load()
+    void syncPublicTutors()
     window.addEventListener(STORE_EVENT, load)
     return () => window.removeEventListener(STORE_EVENT, load)
   }, [])
@@ -193,7 +311,7 @@ export function hasBookingConflict(tutorId: string, date: string, time: string, 
       booking.tutorId === tutorId &&
       booking.date === date &&
       booking.time === time &&
-      booking.status !== 'cancelled' &&
+      (booking.status === 'confirmed' || booking.status === 'pending') &&
       booking.id !== excludeId,
   )
 }
@@ -216,8 +334,13 @@ export function createBookingRequest(booking: Booking): { booking?: Booking; err
     return { error: 'That time is already requested or booked.' }
   }
 
-  saveBooking(booking)
-  return { booking }
+  const pendingBooking: Booking = {
+    ...booking,
+    status: 'pending',
+  }
+
+  saveBooking(pendingBooking)
+  return { booking: pendingBooking }
 }
 
 export function cancelBooking(bookingId: string): void {

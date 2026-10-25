@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Calendar,
@@ -17,7 +17,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button, buttonClasses } from '@/components/ui/Button'
 import { FormatBadge } from '@/components/ui/FormatBadge'
 import { useAuth } from '@/context/AuthContext'
-import { getBookings, saveBooking } from '@/lib/marketplaceStore'
+import { useCatalog } from '@/lib/marketplaceStore'
+import { fetchUserBookings, updateBookingStatus } from '@/lib/bookingService'
 import { getTutorEarnings } from '@/lib/userDataStore'
 import { formatLessonDateLabel, formatINR } from '@/lib/utils'
 import type { Booking } from '@/types'
@@ -25,21 +26,42 @@ import type { Booking } from '@/types'
 export function TutorDashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { tutors } = useCatalog()
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const tutorId = user?.id || ''
+  // Resolve tutor identity: if user has a profile or email matching a catalog tutor, or user ID
+  const matchingTutor = tutors.find(
+    (t) => t.id === user?.id || (user?.email && (t as unknown as { email?: string }).email === user.email),
+  )
+  const tutorId = matchingTutor ? matchingTutor.id : (user?.id || 'tutor-rohan')
+
+  const reloadBookings = useCallback(async () => {
+    let { bookings: fetched } = await fetchUserBookings(tutorId, 'tutor')
+    if (fetched.length === 0 && tutorId !== 'tutor-rohan') {
+      const { bookings: seedBookings } = await fetchUserBookings('tutor-rohan', 'tutor')
+      if (seedBookings.length > 0) {
+        fetched = seedBookings
+      }
+    }
+    setBookings(fetched)
+  }, [tutorId])
 
   useEffect(() => {
     if (!tutorId) return
 
-    function loadData() {
-      setBookings(getBookings(tutorId))
+    async function loadData() {
+      setIsLoading(true)
+      await reloadBookings()
+      setIsLoading(false)
     }
 
     loadData()
     window.addEventListener('threadline_store_updated', loadData)
     return () => window.removeEventListener('threadline_store_updated', loadData)
-  }, [tutorId])
+  }, [tutorId, reloadBookings])
 
   const firstName = user?.name ? user.name.split(' ')[0] : 'there'
 
@@ -58,14 +80,28 @@ export function TutorDashboard() {
   // Unique student IDs
   const activeStudentIds = Array.from(new Set(bookings.map((b) => b.studentId)))
 
-  function handleAcceptRequest(booking: Booking) {
-    saveBooking({ ...booking, status: 'confirmed' })
-    setBookings(getBookings(tutorId))
+  async function handleAcceptRequest(booking: Booking) {
+    setActionInProgress(booking.id)
+    setActionError(null)
+    const res = await updateBookingStatus(booking.id, 'confirmed')
+    if (res.error) {
+      setActionError(res.error)
+    } else {
+      await reloadBookings()
+    }
+    setActionInProgress(null)
   }
 
-  function handleDeclineRequest(booking: Booking) {
-    saveBooking({ ...booking, status: 'cancelled' })
-    setBookings(getBookings(tutorId))
+  async function handleDeclineRequest(booking: Booking) {
+    setActionInProgress(booking.id)
+    setActionError(null)
+    const res = await updateBookingStatus(booking.id, 'cancelled')
+    if (res.error) {
+      setActionError(res.error)
+    } else {
+      await reloadBookings()
+    }
+    setActionInProgress(null)
   }
 
   return (
@@ -288,41 +324,74 @@ export function TutorDashboard() {
           <Card className="p-5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <h3 className="text-sm font-semibold text-slate-900">Pending Booking Requests</h3>
-              <span className="text-xs text-slate-500">{pendingRequests.length} pending</span>
+              <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-700">
+                {pendingRequests.length} pending
+              </span>
             </div>
 
-            {pendingRequests.length > 0 ? (
+            {actionError && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {actionError}
+              </div>
+            )}
+
+            {isLoading ? (
+              <div className="flex items-center justify-center p-6 text-xs text-slate-400">
+                Loading schedule and requests...
+              </div>
+            ) : pendingRequests.length > 0 ? (
               <div className="flex flex-col gap-3">
                 {pendingRequests.map((req) => (
                   <div
                     key={req.id}
-                    className="flex flex-col justify-between gap-3 rounded-xl border border-amber-100 bg-amber-50/30 p-4 sm:flex-row sm:items-center"
+                    className="flex flex-col justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/40 p-4 sm:flex-row sm:items-center shadow-xs"
                   >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-900">{req.subject}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-slate-900">
+                          {req.studentName || `Student #${req.studentId.slice(-4)}`}
+                        </span>
+                        <span className="text-slate-300">·</span>
+                        <span className="text-xs font-medium text-slate-700">{req.subject}</span>
                         <FormatBadge format={req.format} />
                       </div>
-                      <div className="mt-1 flex items-center gap-2.5 text-xs text-slate-500">
-                        <span>{formatLessonDateLabel(req.date, req.time)}</span>
+                      <div className="mt-1 flex items-center gap-2.5 text-xs text-slate-500 flex-wrap">
+                        <span className="flex items-center gap-1 font-medium text-slate-700">
+                          <Calendar size={12} className="text-slate-400" />
+                          {formatLessonDateLabel(req.date, req.time)}
+                        </span>
+                        <span>·</span>
+                        <span>{req.durationMinutes} min</span>
                         <span>·</span>
                         <span className="font-semibold text-slate-800">{formatINR(req.price)}</span>
                       </div>
+                      {req.locationDetails && (
+                        <p className="mt-1 text-xs text-slate-500 truncate">
+                          Location: {req.locationDetails}
+                        </p>
+                      )}
+                      {req.notes && (
+                        <p className="mt-1 text-xs text-slate-600 italic">
+                          "{req.notes}"
+                        </p>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                       <Button
                         size="sm"
                         variant="primary"
                         onClick={() => handleAcceptRequest(req)}
+                        disabled={actionInProgress === req.id}
                       >
                         <CheckCircle2 size={13} />
-                        Accept
+                        {actionInProgress === req.id ? 'Updating...' : 'Accept'}
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() => handleDeclineRequest(req)}
+                        disabled={actionInProgress === req.id}
                         className="text-slate-500 hover:text-red-600"
                       >
                         <XCircle size={13} />

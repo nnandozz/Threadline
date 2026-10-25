@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom'
 import {
   Calendar,
@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   CreditCard,
   AlertCircle,
+  Loader2,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button, buttonClasses } from '@/components/ui/Button'
@@ -20,9 +21,10 @@ import { Textarea } from '@/components/ui/Textarea'
 import { FormatBadge } from '@/components/ui/FormatBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useAuth } from '@/context/AuthContext'
-import { getTutorById, createBookingRequest, useCatalog } from '@/lib/marketplaceStore'
+import { getTutorById, fetchTutorById, useCatalog } from '@/lib/marketplaceStore'
+import { createBooking } from '@/lib/bookingService'
 import { formatLessonDateLabel, formatINR } from '@/lib/utils'
-import type { TeachingFormat, BookingType, Booking } from '@/types'
+import type { TeachingFormat, BookingType, Booking, Tutor } from '@/types'
 
 export function BookingPage() {
   const { tutorId } = useParams<{ tutorId: string }>()
@@ -31,7 +33,43 @@ export function BookingPage() {
   const { user } = useAuth()
   const { tutors } = useCatalog()
 
-  const tutor = (tutorId ? getTutorById(tutorId) : undefined) ?? tutors.find((t) => t.id === tutorId)
+  const cachedTutor = (tutorId ? getTutorById(tutorId) : undefined) ?? tutors.find((t) => t.id === tutorId)
+  const [tutor, setTutor] = useState<Tutor | undefined>(cachedTutor)
+  const [isLoadingTutor, setIsLoadingTutor] = useState<boolean>(!cachedTutor)
+
+  useEffect(() => {
+    if (!tutorId) {
+      setIsLoadingTutor(false)
+      return
+    }
+
+    const localTutor = getTutorById(tutorId) ?? tutors.find((t) => t.id === tutorId)
+    if (localTutor) {
+      setTutor(localTutor)
+      setIsLoadingTutor(false)
+      return
+    }
+
+    let isMounted = true
+    setIsLoadingTutor(true)
+    fetchTutorById(tutorId)
+      .then((fetched) => {
+        if (isMounted) {
+          setTutor(fetched ?? undefined)
+          setIsLoadingTutor(false)
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setIsLoadingTutor(false)
+        }
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [tutorId, tutors])
+
   const initialFormat = (searchParams.get('format') as TeachingFormat) || (tutor?.formats[0] ?? 'online')
 
   // Booking state
@@ -45,15 +83,39 @@ export function BookingPage() {
   const [bookingError, setBookingError] = useState<string | null>(null)
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null)
 
-  // Initialize slot selection once tutor loads
-  useMemo(() => {
-    if (tutor && tutor.availability.length > 0 && !selectedSlotIndex) {
-      setSelectedSlotIndex({
-        date: tutor.availability[0].date,
-        time: tutor.availability[0].times[0],
+  // Initialize format & slot selection once tutor loads
+  useEffect(() => {
+    if (tutor) {
+      const paramFormat = searchParams.get('format') as TeachingFormat
+      if (paramFormat && tutor.formats.includes(paramFormat)) {
+        setFormat(paramFormat)
+      } else {
+        setFormat((prev) => (tutor.formats.includes(prev) ? prev : (tutor.formats[0] ?? 'online')))
+      }
+
+      setSelectedSlotIndex((prev) => {
+        if (prev) return prev
+        if (tutor.availability.length > 0 && tutor.availability[0].times.length > 0) {
+          return {
+            date: tutor.availability[0].date,
+            time: tutor.availability[0].times[0],
+          }
+        }
+        return null
       })
     }
-  }, [tutor, selectedSlotIndex])
+  }, [tutor, searchParams])
+
+  if (isLoadingTutor) {
+    return (
+      <div className="mx-auto flex min-h-[400px] max-w-4xl items-center justify-center px-4 py-16">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-brand" />
+          <p className="text-small text-ink-muted">Loading tutor details...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!tutor) {
     return (
@@ -85,7 +147,7 @@ export function BookingPage() {
   }
   const totalPrice = Math.round(rawPrice + travelFee)
 
-  function handleConfirmBooking() {
+  async function handleConfirmBooking() {
     if (!selectedSlotIndex || !tutor) return
     if (!user) {
       navigate(`/login?redirect=${encodeURIComponent(`/book/${tutor.id}`)}`)
@@ -101,6 +163,7 @@ export function BookingPage() {
     const newBooking: Booking = {
       id: `booking-${Date.now().toString().slice(-6)}`,
       studentId: user.id,
+      studentName: user.name || 'Student',
       tutorId: tutor.id,
       type: bookingType,
       subject: tutor.specialties[0] || 'Private Tutoring',
@@ -109,7 +172,7 @@ export function BookingPage() {
       time: selectedSlotIndex.time,
       durationMinutes: durationMinutes,
       price: totalPrice,
-      status: 'confirmed',
+      status: 'pending',
       locationDetails:
         format === 'in-person-student'
           ? `Student Location: ${locationAddress}`
@@ -121,7 +184,7 @@ export function BookingPage() {
       createdAt: new Date().toISOString().split('T')[0],
     }
 
-    const res = createBookingRequest(newBooking)
+    const res = await createBooking(newBooking)
     if (res.error) {
       setBookingError(res.error)
       setIsSubmitting(false)
@@ -129,7 +192,7 @@ export function BookingPage() {
     }
 
     setIsSubmitting(false)
-    setConfirmedBooking(newBooking)
+    setConfirmedBooking(res.data || newBooking)
   }
 
   // Confirmation View
@@ -137,7 +200,7 @@ export function BookingPage() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-16">
         <div className="flex flex-col items-center gap-6 rounded-xl border border-slate-200/80 bg-white p-8 text-center shadow-sm md:p-10">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-600">
             <CheckCircle2 size={32} />
           </div>
 
@@ -145,9 +208,11 @@ export function BookingPage() {
             <span className="text-xs font-semibold uppercase tracking-wider text-primary">
               Reference #{confirmedBooking.id.toUpperCase()}
             </span>
-            <h1 className="text-2xl font-bold text-slate-900">Booking Confirmed!</h1>
-            <p className="text-sm text-slate-600">
-              Your session with <strong className="text-slate-900">{tutor.name}</strong> has been scheduled and added to your learning dashboard.
+            <h1 className="text-2xl font-bold text-slate-900">Booking Request Submitted!</h1>
+            <p className="text-sm text-slate-600 max-w-lg">
+              Your session request with <strong className="text-slate-900">{tutor.name}</strong> has been registered with status{' '}
+              <span className="rounded-md bg-amber-100 px-2 py-0.5 font-semibold text-amber-800">Pending Review</span>.
+              The tutor has been notified and can confirm or coordinate arrangements from their dashboard.
             </p>
           </div>
 
@@ -162,6 +227,13 @@ export function BookingPage() {
                 </p>
               </div>
               <div>
+                <p className="text-ink-secondary">Request Status</p>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/80 px-2.5 py-0.5 text-xs font-bold text-amber-900">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  Awaiting Tutor Acceptance
+                </span>
+              </div>
+              <div>
                 <p className="text-ink-secondary">Teaching Format</p>
                 <FormatBadge format={confirmedBooking.format} />
               </div>
@@ -172,12 +244,12 @@ export function BookingPage() {
                 </p>
               </div>
               <div>
-                <p className="text-ink-secondary">Total (Demo)</p>
+                <p className="text-ink-secondary">Total Session Fee</p>
                 <p className="font-semibold text-ink">{formatINR(confirmedBooking.price)}</p>
               </div>
               {confirmedBooking.locationDetails && (
                 <div className="col-span-2 border-t border-border pt-2">
-                  <p className="text-ink-secondary">Agreed Location</p>
+                  <p className="text-ink-secondary">Requested Location</p>
                   <p className="font-medium text-ink">{confirmedBooking.locationDetails}</p>
                 </div>
               )}
@@ -189,13 +261,13 @@ export function BookingPage() {
               Go to Student Dashboard
               <ArrowRight size={16} />
             </Button>
-            <Button variant="secondary" size="lg" onClick={() => navigate('/lessons')}>
-              View My Schedule
+            <Button variant="secondary" size="lg" onClick={() => navigate('/tutors')}>
+              Browse More Educators
             </Button>
           </div>
 
           <p className="text-label text-ink-secondary italic">
-            Threadline AI Memory: Pre-session brief has been prepared for {tutor.name} based on your past concepts.
+            Threadline AI Memory: Pre-session learning goals will be made accessible to {tutor.name} upon confirmation.
           </p>
         </div>
       </div>

@@ -119,6 +119,7 @@ export function LoginPage() {
 
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
         <Input
+          id="login-email"
           label="Email address"
           type="email"
           autoComplete="email"
@@ -132,6 +133,7 @@ export function LoginPage() {
           disabled={isSubmitting}
         />
         <Input
+          id="login-password"
           label="Password"
           type="password"
           autoComplete="current-password"
