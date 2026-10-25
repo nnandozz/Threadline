@@ -14,6 +14,9 @@ import { Badge } from '@/components/ui/Badge'
 import { buttonClasses } from '@/components/ui/Button'
 import { FormatBadge } from '@/components/ui/FormatBadge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { useAuth } from '@/context/AuthContext'
+import { getUserLessons, getUserVocabulary } from '@/lib/userDataStore'
+import { getTutorById } from '@/lib/marketplaceStore'
 import {
   lessons,
   allTutors,
@@ -24,9 +27,11 @@ import { formatShortDate } from '@/lib/utils'
 
 export function LessonSummaryPage() {
   const { lessonId } = useParams<{ lessonId: string }>()
+  const { user } = useAuth()
 
-  const lesson = lessons.find((l) => l.id === lessonId) || lessons[3] // fallback to aug10 flagship lesson
-  const tutor = allTutors.find((t) => t.id === lesson?.tutorId) || allTutors[0]
+  const userLessons = getUserLessons(user?.id)
+  const lesson = userLessons.find((l) => l.id === lessonId) || lessons.find((l) => l.id === lessonId) || lessons[3]
+  const tutor = (lesson ? getTutorById(lesson.tutorId) : undefined) || allTutors.find((t) => t.id === lesson?.tutorId) || allTutors[0]
 
   if (!lesson || !lesson.summary) {
     return (
@@ -45,7 +50,9 @@ export function LessonSummaryPage() {
   }
 
   const { summary } = lesson
-  const newVocab = sarahVocabulary.filter((v) => summary.newVocabularyIds.includes(v.id))
+  const userVocab = getUserVocabulary(user?.id)
+  const combinedVocab = [...userVocab, ...sarahVocabulary]
+  const newVocab = combinedVocab.filter((v) => summary.newVocabularyIds.includes(v.id))
   const lessonHomework = homeworkItems.filter((h) => h.sourceLessonId === lesson.id)
 
   return (

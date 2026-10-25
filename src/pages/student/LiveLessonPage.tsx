@@ -171,11 +171,11 @@ export function LiveLessonPage() {
 
             <button
               type="button"
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(`/lesson/${lesson.id}/summary`)}
               className="flex h-12 items-center gap-2 rounded-full bg-red-600 px-6 font-semibold text-white hover:bg-red-500 transition-colors shadow-lg"
             >
               <PhoneOff size={18} />
-              Leave Session
+              End & Review AI Summary
             </button>
           </div>
         </div>

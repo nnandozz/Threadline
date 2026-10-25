@@ -25,7 +25,10 @@ export function VocabularyPage() {
 
   useEffect(() => {
     if (!studentId) return
-    setWords(getUserVocabulary(studentId))
+    const load = () => setWords(getUserVocabulary(studentId))
+    load()
+    window.addEventListener('threadline_user_data_updated', load)
+    return () => window.removeEventListener('threadline_user_data_updated', load)
   }, [studentId])
 
   const filteredWords = words.filter((w) => filter === 'all' || w.mastery === filter)

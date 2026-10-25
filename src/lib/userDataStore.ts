@@ -109,6 +109,24 @@ export function getUserProgressPoints(userId?: string): ProgressPoint[] {
   return safeGetItem<ProgressPoint[]>(`threadline_progress_${uid}`, [])
 }
 
+export function saveUserRecurringError(errorItem: RecurringError, userId?: string): void {
+  const uid = userId || getCurrentUser()?.id
+  if (!uid) return
+  const current = getUserRecurringErrors(uid)
+  const exists = current.some((e) => e.id === errorItem.id)
+  const updated = exists ? current.map((e) => (e.id === errorItem.id ? errorItem : e)) : [errorItem, ...current]
+  safeSetItem(`threadline_errors_${uid}`, updated)
+}
+
+export function saveUserProgressPoint(point: ProgressPoint, userId?: string): void {
+  const uid = userId || getCurrentUser()?.id
+  if (!uid) return
+  const current = getUserProgressPoints(uid)
+  const exists = current.some((p) => p.date === point.date)
+  const updated = exists ? current.map((p) => (p.date === point.date ? point : p)) : [...current, point]
+  safeSetItem(`threadline_progress_${uid}`, updated)
+}
+
 // ─────────────────────────────────────────────────────────────
 // Tutor-Scoped Booking Requests & Earnings
 // ─────────────────────────────────────────────────────────────

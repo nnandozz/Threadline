@@ -22,6 +22,7 @@ import {
   getCourseById,
   useCatalog,
 } from '@/lib/marketplaceStore'
+import { fetchUserBookings } from '@/lib/bookingService'
 import { getUserLessons } from '@/lib/userDataStore'
 import { formatLessonDateLabel, formatShortDate, formatINR } from '@/lib/utils'
 import type { Booking, Lesson } from '@/types'
@@ -41,8 +42,10 @@ export function MyLearningPage() {
   useEffect(() => {
     if (!studentId) return
 
-    function loadData() {
-      setBookings(getBookings(studentId))
+    async function loadData() {
+      const { bookings: fetched } = await fetchUserBookings(studentId, 'student')
+      const effective = fetched.length > 0 ? fetched : getBookings(studentId)
+      setBookings(effective)
       setEnrolledCourseIds(getEnrolledCourseIds(studentId))
       setPastLessons(getUserLessons(studentId))
     }

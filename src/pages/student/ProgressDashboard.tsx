@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Sparkles,
@@ -21,10 +22,25 @@ export function ProgressDashboard() {
   const { user } = useAuth()
   const studentId = user?.id || ''
 
-  const progressHistory = getUserProgressPoints(studentId)
-  const recurringErrors = getUserRecurringErrors(studentId)
-  const vocabulary = getUserVocabulary(studentId)
-  const completedLessons = getUserLessons(studentId).filter((l) => l.status === 'completed')
+  const [progressHistory, setProgressHistory] = useState(() => getUserProgressPoints(studentId))
+  const [recurringErrors, setRecurringErrors] = useState(() => getUserRecurringErrors(studentId))
+  const [vocabulary, setVocabulary] = useState(() => getUserVocabulary(studentId))
+  const [completedLessons, setCompletedLessons] = useState(() =>
+    getUserLessons(studentId).filter((l) => l.status === 'completed'),
+  )
+
+  useEffect(() => {
+    if (!studentId) return
+    function load() {
+      setProgressHistory(getUserProgressPoints(studentId))
+      setRecurringErrors(getUserRecurringErrors(studentId))
+      setVocabulary(getUserVocabulary(studentId))
+      setCompletedLessons(getUserLessons(studentId).filter((l) => l.status === 'completed'))
+    }
+    load()
+    window.addEventListener('threadline_user_data_updated', load)
+    return () => window.removeEventListener('threadline_user_data_updated', load)
+  }, [studentId])
 
   const hasHistory = progressHistory.length > 0 || completedLessons.length > 0
 
