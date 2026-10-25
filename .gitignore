@@ -8,3 +8,6 @@ dist-ssr
 *.tsbuildinfo
 vite.config.d.ts
 vite.config.js
+dnn/.venv/
+__pycache__/
+*.pyc

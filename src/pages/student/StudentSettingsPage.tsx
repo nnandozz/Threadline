@@ -5,7 +5,9 @@ import {
   MapPin,
   Save,
   CheckCircle2,
+  AlertCircle,
   User,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -16,19 +18,35 @@ import {
   getAiPrivacySettings,
   updateAiPrivacySettings,
 } from '@/lib/marketplaceStore'
-import { ananyaSharma } from '@/data/mockData'
+import { useAuth } from '@/context/AuthContext'
 import { formatINR } from '@/lib/utils'
 import type { TeachingFormat } from '@/types'
 
 export function StudentSettingsPage() {
-  const [prefs, setPrefs] = useState(getLearningPreferences())
-  const [privacy, setPrivacy] = useState(getAiPrivacySettings())
-  const [savedNotice, setSavedNotice] = useState(false)
+  const { user, updateProfile, isLoading } = useAuth()
 
+  const [name, setName] = useState(user?.name || '')
+  const [learningGoal, setLearningGoal] = useState('')
+  const [prefs, setPrefs] = useState(() => getLearningPreferences(user?.id))
+  const [privacy, setPrivacy] = useState(() => getAiPrivacySettings(user?.id))
+
+  const [isSaving, setIsSaving] = useState(false)
+  const [savedNotice, setSavedNotice] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  // Sync state when authenticated user profile loads or refreshes
   useEffect(() => {
-    setPrefs(getLearningPreferences())
-    setPrivacy(getAiPrivacySettings())
-  }, [])
+    if (user) {
+      setName(user.name || '')
+      const goalsText =
+        user.learningGoals && user.learningGoals.length > 0
+          ? user.learningGoals.join(', ')
+          : getLearningPreferences(user.id).learningGoal || ''
+      setLearningGoal(goalsText)
+      setPrefs(getLearningPreferences(user.id))
+      setPrivacy(getAiPrivacySettings(user.id))
+    }
+  }, [user])
 
   function toggleFormat(fmt: TeachingFormat) {
     const current = prefs.preferredFormats
@@ -38,11 +56,60 @@ export function StudentSettingsPage() {
     setPrefs({ ...prefs, preferredFormats: updated })
   }
 
-  function handleSave() {
-    updateLearningPreferences(prefs)
-    updateAiPrivacySettings(privacy)
-    setSavedNotice(true)
-    setTimeout(() => setSavedNotice(false), 3000)
+  async function handleSave() {
+    if (!user) return
+
+    setIsSaving(true)
+    setErrorMessage(null)
+    setSavedNotice(false)
+
+    try {
+      // 1. Persist genuine profile fields (name and learning_goals) to Supabase
+      const trimmedName = name.trim()
+      const goalsArray = learningGoal
+        .split(',')
+        .map((g) => g.trim())
+        .filter(Boolean)
+
+      const profileRes = await updateProfile({
+        name: trimmedName || user.name,
+        learningGoals: goalsArray.length > 0 ? goalsArray : (learningGoal.trim() ? [learningGoal.trim()] : []),
+      })
+
+      if (!profileRes.success) {
+        setErrorMessage(profileRes.error || 'Failed to update profile in database.')
+        setIsSaving(false)
+        return
+      }
+
+      // 2. Persist user-scoped preferences and AI privacy to user-specific localStorage keys
+      updateLearningPreferences(
+        {
+          ...prefs,
+          learningGoal: learningGoal.trim(),
+        },
+        user.id,
+      )
+
+      updateAiPrivacySettings(privacy, user.id)
+
+      setSavedNotice(true)
+      setTimeout(() => setSavedNotice(false), 4000)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'An unexpected error occurred while saving.'
+      setErrorMessage(msg)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[300px] flex-col items-center justify-center gap-3">
+        <Loader2 size={24} className="animate-spin text-primary" />
+        <span className="text-xs text-slate-500">Loading student profile…</span>
+      </div>
+    )
   }
 
   return (
@@ -51,28 +118,58 @@ export function StudentSettingsPage() {
       <div>
         <h1 className="text-h1 text-ink">Student Settings & Preferences</h1>
         <p className="text-body text-ink-secondary">
-          Configure your learning formats, geographic discovery filters, budget, and Threadline AI Continuity sharing permissions.
+          Manage your student profile identity, preferred learning formats, budget, and Threadline AI Continuity sharing permissions.
         </p>
       </div>
 
       {savedNotice && (
         <div className="flex items-center gap-2 rounded-xl bg-success-light p-4 text-small font-semibold text-success border border-success/20">
           <CheckCircle2 size={18} />
-          Your preferences and AI privacy settings have been updated successfully!
+          Your profile and preferences have been updated and synchronized successfully!
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="flex items-center gap-2 rounded-xl bg-red-50 p-4 text-small font-semibold text-red-600 border border-red-200">
+          <AlertCircle size={18} />
+          {errorMessage}
         </div>
       )}
 
       {/* 1. Learning Profile & Goals */}
       <section className="rounded-xl border border-slate-200/80 bg-white p-6 shadow-xs">
-        <div className="flex items-center gap-2 mb-4 border-b border-border pb-3">
-          <User className="text-primary" size={20} />
-          <h2 className="text-h3 text-ink">Learning Goals & Profile</h2>
+        <div className="flex items-center justify-between mb-4 border-b border-border pb-3">
+          <div className="flex items-center gap-2">
+            <User className="text-primary" size={20} />
+            <h2 className="text-h3 text-ink">Learning Goals & Profile</h2>
+          </div>
+          <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-primary">
+            Cloud Synchronized
+          </span>
         </div>
 
         <div className="flex flex-col gap-4">
-          <div>
-            <label className="text-small font-semibold text-ink block mb-1">Full Name</label>
-            <Input value={ananyaSharma.name} disabled className="bg-slate-50 cursor-not-allowed" />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-small font-semibold text-ink block mb-1">Full Name</label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter your name"
+              />
+            </div>
+
+            <div>
+              <label className="text-small font-semibold text-ink block mb-1">Account Email</label>
+              <Input
+                value={user?.email || ''}
+                disabled
+                className="bg-slate-50 text-slate-500 cursor-not-allowed"
+              />
+              <p className="text-[11px] text-ink-secondary mt-1">
+                Verified login identity. Protected against direct client mutation.
+              </p>
+            </div>
           </div>
 
           <div>
@@ -81,12 +178,12 @@ export function StudentSettingsPage() {
             </label>
             <Textarea
               rows={2}
-              value={prefs.learningGoal}
-              onChange={(e) => setPrefs({ ...prefs, learningGoal: e.target.value })}
+              value={learningGoal}
+              onChange={(e) => setLearningGoal(e.target.value)}
               placeholder="e.g. Master algorithms and executive communication"
             />
             <p className="text-label text-ink-secondary mt-1">
-              This objective informs tutor match recommendations on your dashboard.
+              This objective informs tutor match recommendations and is persisted to your Supabase profile.
             </p>
           </div>
         </div>
@@ -94,9 +191,14 @@ export function StudentSettingsPage() {
 
       {/* 2. Teaching Format & Location Preferences */}
       <section className="rounded-xl border border-slate-200/80 bg-white p-6 shadow-xs">
-        <div className="flex items-center gap-2 mb-4 border-b border-border pb-3">
-          <MapPin className="text-success" size={20} />
-          <h2 className="text-h3 text-ink">Teaching Format & In-Person Location</h2>
+        <div className="flex items-center justify-between mb-4 border-b border-border pb-3">
+          <div className="flex items-center gap-2">
+            <MapPin className="text-success" size={20} />
+            <h2 className="text-h3 text-ink">Teaching Format & In-Person Location</h2>
+          </div>
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+            Device Preference
+          </span>
         </div>
 
         <div className="flex flex-col gap-5">
@@ -185,7 +287,12 @@ export function StudentSettingsPage() {
             <Sparkles className="text-primary" size={20} />
             <h2 className="text-h3 text-ink">AI Learning Continuity & Privacy Controls</h2>
           </div>
-          <ShieldCheck size={20} className="text-success" />
+          <div className="flex items-center gap-1.5">
+            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+              Device Preference
+            </span>
+            <ShieldCheck size={20} className="text-success" />
+          </div>
         </div>
 
         <p className="text-small text-ink-secondary mb-5">
@@ -273,9 +380,9 @@ export function StudentSettingsPage() {
 
       {/* Save Button */}
       <div className="flex justify-end">
-        <Button size="lg" onClick={handleSave}>
-          <Save size={16} />
-          Save All Preferences
+        <Button size="lg" onClick={handleSave} disabled={isSaving}>
+          {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+          {isSaving ? 'Saving Changes…' : 'Save All Preferences'}
         </Button>
       </div>
     </div>

@@ -11,6 +11,7 @@ import type {
 import { getCurrentUser } from '@/lib/authService'
 import { safeGetItem, safeSetItem } from '@/lib/persistence'
 import { mergeAvailability, removeAvailabilityTime } from '@/lib/availability'
+import { allTutors } from '@/data/mockData'
 
 const STORE_EVENT = 'threadline_store_updated'
 const BOOKINGS_KEY = 'threadline_bookings'
@@ -45,11 +46,46 @@ function persist<T>(key: string, value: T): void {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Tutor directory (registered tutors only — never seeded)
+// Tutor directory (initialized from curated catalog, persists user tutors)
 // ─────────────────────────────────────────────────────────────
 
+export function initializeTutorDirectory(): Tutor[] {
+  if (typeof window === 'undefined') return allTutors
+
+  const raw = localStorage.getItem(TUTORS_KEY)
+  if (!raw) {
+    // Uninitialized directory: seed with curated allTutors
+    safeSetItem(TUTORS_KEY, allTutors, STORE_EVENT)
+    return allTutors
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      safeSetItem(TUTORS_KEY, allTutors, STORE_EVENT)
+      return allTutors
+    }
+
+    // If directory has tutors, ensure any user-added tutors are preserved.
+    // If seed tutors are missing (e.g. legacy session with only a user-created tutor),
+    // merge seed tutors without ID collisions.
+    const hasAnySeed = parsed.some((t) => allTutors.some((s) => s.id === t.id))
+    if (!hasAnySeed) {
+      const merged = [...parsed, ...allTutors.filter((s) => !parsed.some((p) => p.id === s.id))]
+      safeSetItem(TUTORS_KEY, merged, STORE_EVENT)
+      return merged
+    }
+
+    return parsed as Tutor[]
+  } catch {
+    // Malformed JSON recovery: safely re-seed
+    safeSetItem(TUTORS_KEY, allTutors, STORE_EVENT)
+    return allTutors
+  }
+}
+
 export function listTutors(): Tutor[] {
-  return safeGetItem<Tutor[]>(TUTORS_KEY, [])
+  return initializeTutorDirectory()
 }
 
 export function getTutorById(tutorId: string): Tutor | undefined {
